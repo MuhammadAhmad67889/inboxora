@@ -1,0 +1,44 @@
+{
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "next": "16.4.6",
+    "nodemailer": "10.3.1",
+    "prisma": "6.19.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "description": "Inboxora \u2014 WhatsApp AI support inbox. Multi-tenant SaaS: shared inbox, AI drafts from the business's own FAQ, human approval, tickets.",
+  "devDependencies": {
+    "@tailwindcss/turbopack": "4.3.3",
+    "@types/node": "24.19.2",
+    "@types/nodemailer": "8.0.2",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.4.6",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "^7.3.8",
+    "vitest": "5.1.0"
+  },
+  "name": "inboxora",
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "private": true,
+  "scripts": {
+    "build": "prisma generate && next build",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "dev": "next dev",
+    "lint": "eslint .",
+    "postinstall": "prisma generate",
+    "start": "next start",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:vercel": "prisma generate && (prisma db push || (sleep 30 && prisma db push)) && next build"
+  },
+  "version": "0.1.0"
+}
