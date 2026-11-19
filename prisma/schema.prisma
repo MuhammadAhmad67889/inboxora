@@ -1,0 +1,260 @@
+// Prisma schema for the WhatsApp AI support inbox.
+//
+// Local dev runs on SQLite (no Postgres server on the dev VM);
+// production targets Neon Postgres. To keep ONE schema working on
+// both, statuses are plain String fields with named constants in
+// code (SQLite has no enum type), and there are no scalar lists or
+// Json columns. Deploying to Postgres only means changing the
+// provider below and DATABASE_URL.
+//
+// Every business row carries workspaceId and every query is
+// workspace-scoped. The isolation tests in src/lib/isolation.test.ts
+// prove one workspace cannot reach another's rows.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions      Session[]
+  resetTokens   PasswordResetToken[]
+  memberships   Membership[]
+  assignedChats Conversation[]       @relation("Assignee")
+  sentMessages  Message[]            @relation("Sender")
+  notes         ConversationNote[]   @relation("NoteAuthor")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Password reset tokens: only the hash is stored, one hour TTL,
+// single use (usedAt set when consumed).
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  // Demo workspaces hold simulated chats only. The UI labels them
+  // DEMO everywhere so nobody mistakes them for a live connection.
+  isDemo    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships   Membership[]
+  invites       Invite[]
+  contacts      Contact[]
+  conversations Conversation[]
+  messages      Message[]
+  knowledge     KnowledgeEntry[]
+  tickets       Ticket[]
+  notes         ConversationNote[]
+  businessProfile BusinessProfile?
+  connection    WhatsAppConnection?
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // "owner" or "agent" (see ROLES in src/lib/workspaces.ts).
+  role        String    @default("agent")
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+// An email invitation to join a workspace. Only the token hash is
+// stored; the raw token travels in the invite link.
+model Invite {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  role        String    @default("agent")
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+// A WhatsApp customer of one workspace.
+model Contact {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  phone       String
+  name        String?
+  isDemo      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  conversations Conversation[]
+
+  @@unique([workspaceId, phone])
+  @@index([workspaceId])
+}
+
+model Conversation {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contactId     String
+  contact       Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  // "open" or "resolved".
+  status        String    @default("open")
+  assigneeId    String?
+  assignee      User?     @relation("Assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  unreadCount   Int       @default(0)
+  lastMessageAt DateTime  @default(now())
+  isDemo        Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  messages Message[]
+  tickets  Ticket[]
+  notes    ConversationNote[]
+
+  @@index([workspaceId, lastMessageAt])
+  @@index([contactId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // "in" = from the customer, "out" = from the business.
+  direction      String
+  // "customer", "agent" or "ai".
+  authorType     String
+  senderId       String?
+  sender         User?        @relation("Sender", fields: [senderId], references: [id], onDelete: SetNull)
+  text           String
+  // Phase 3: which knowledge entry an AI draft was based on.
+  sourceEntryId  String?
+  // Human-readable citation shown with the draft, e.g.
+  // "FAQ — Delivery charges" or "Business info — hours".
+  sourceLabel    String?
+  // "demo" or "live" for AI drafts; null for human messages.
+  aiMode         String?
+  // "sent" for real messages; AI drafts stay "draft" until approved.
+  status         String       @default("sent")
+  isDemo         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  @@index([workspaceId, conversationId, createdAt])
+}
+
+// One FAQ/business-info entry the AI may answer from (Phase 3).
+model KnowledgeEntry {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String
+  content     String
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId])
+}
+
+// A chat that needs a human (Phase 3 creates these on AI no-match).
+model Ticket {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // "open", "waiting" or "resolved".
+  status         String       @default("open")
+  // "low", "normal" or "high".
+  priority       String       @default("normal")
+  // "ai-no-match" (created when the AI found no answer) or "manual".
+  source         String       @default("manual")
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([workspaceId, status])
+}
+
+// An internal note on a conversation. Stored in its own table so a
+// note can never be mistaken for (or sent as) a customer message.
+model ConversationNote {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation("NoteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  text           String
+  createdAt      DateTime     @default(now())
+
+  @@index([workspaceId, conversationId, createdAt])
+}
+
+// The business facts the owner fills in (name, hours, address,
+// policies). One per workspace. Phase 3's AI answers from this plus
+// the FAQ entries — nothing else.
+model BusinessProfile {
+  id           String    @id @default(cuid())
+  workspaceId  String    @unique
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  businessName String    @default("")
+  hours        String    @default("")
+  address      String    @default("")
+  policies     String    @default("")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// Meta Cloud API credentials for a workspace. Built in Phase 4;
+// the model exists now so the schema is complete. The access token
+// is stored encrypted, never in plaintext.
+model WhatsAppConnection {
+  id               String    @id @default(cuid())
+  workspaceId      String    @unique
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  phoneNumberId    String
+  accessTokenEnc   String
+  webhookVerifyKey String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
