@@ -19,4 +19,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      # The test suite pushes the schema into a throwaway SQLite file.
+      # Production uses Postgres, so swap the provider for tests only.
+      - run: sed -i 's/provider = "postgresql"/provider = "sqlite"/' prisma/schema.prisma
+      - run: npx prisma generate
       - run: npm test
