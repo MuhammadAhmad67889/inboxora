@@ -1,0 +1,125 @@
+/* Hallmark · shape: app screen + landing · genre: modern-minimal · theme: custom (project tokens in @theme below)
+ * paper: #f7f5f0 · accent: #0b6e63 · display: system sans · body: system sans
+ * nav: app header rows · signature: the AI draft card citing its FAQ source · states: default, hover, focus-visible, active, disabled
+ * axes: light/grotesk-sans/chromatic-green · posture: utilitarian · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S3 R4 V4 · weakest: S, landing is plain stacked sections; led with the honest demo note and pricing instead of decoration */
+@import "tailwindcss";
+
+/* Design tokens. One accent (WhatsApp-adjacent green, kept deep
+ * enough for readable text), warm neutrals, no gradients. */
+@theme {
+  --color-accent: #0b6e63;
+  --color-accent-dark: #0b6e63;
+  --color-accent-deep: #08544c;
+  --color-accent-ink: #f7f5f0;
+  --color-card: #fdfcf9;
+  --color-disabled-ink: #43524b;
+  --color-ink: #1c2420;
+  --color-muted: #5c6a64;
+  --color-paper: #f7f5f0;
+  --color-line: #ddd8cd;
+  --color-danger: #b3261e;
+  --color-note: #fff3bf;
+  --color-note-line: #e6cf6b;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html {
+  scrollbar-color: var(--color-line) var(--color-paper);
+}
+
+::selection {
+  background: var(--color-accent-dark);
+  color: var(--color-accent-ink);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+.field {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-card);
+  padding: 8px 12px;
+}
+
+.field:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  display: inline-block;
+  border-radius: 8px;
+  background: var(--color-accent-dark);
+  color: var(--color-accent-ink);
+  font-weight: 600;
+  padding: 12px 20px;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  background: var(--color-accent-deep);
+}
+
+.btn-primary:active {
+  background: var(--color-accent-deep);
+  transform: translateY(1px);
+}
+
+.btn-primary:disabled {
+  background: var(--color-line);
+  color: var(--color-disabled-ink);
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  display: inline-block;
+  border-radius: 8px;
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-ink);
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  border-color: var(--color-accent-dark);
+}
+
+.btn-ghost:active {
+  transform: translateY(1px);
+}
+
+.error-text {
+  color: var(--color-danger);
+  font-size: 14px;
+}
+
+.demo-badge {
+  display: inline-block;
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent-dark);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 1px 8px;
+}
