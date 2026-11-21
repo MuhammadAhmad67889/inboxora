@@ -22,14 +22,18 @@ export default async function TicketsPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
-  const user = await getCurrentUser();
+  // The status filter comes from the URL, so it does not need
+  // to wait for the session lookup. Resolve both at once.
+  const [user, { status: rawStatus }] = await Promise.all([
+    getCurrentUser(),
+    searchParams,
+  ]);
   if (!user) redirect("/login");
 
   const workspaces = await listWorkspacesForUser(user.id);
   const current = workspaces[0];
   if (!current) redirect("/signup");
 
-  const { status: rawStatus } = await searchParams;
   const statusFilter = isTicketStatus(rawStatus) ? rawStatus : undefined;
   const tickets = await listTickets(current.workspace.id, undefined, statusFilter);
 
@@ -45,6 +49,9 @@ export default async function TicketsPage({
         <div className="flex gap-2">
           <Link className="btn-ghost" href="/inbox">
             Inbox
+          </Link>
+          <Link className="btn-ghost" href="/analytics">
+            Analytics
           </Link>
           <SignOutButton />
         </div>

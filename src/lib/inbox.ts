@@ -1,4 +1,4 @@
-import type { Conversation, Message, PrismaClient } from "@prisma/client";
+import type { Conversation, Message, Prisma, PrismaClient } from "@prisma/client";
 import { getPrisma } from "./prisma";
 
 /**
@@ -8,15 +8,36 @@ import { getPrisma } from "./prisma";
  * read or write another workspace's rows through these functions.
  */
 
+export type ConversationTagView = {
+  color: string | null;
+  id: string;
+  name: string;
+};
+
 export type ConversationWithContact = Conversation & {
   assignee: { email: string; id: string; name: string | null } | null;
   contact: { id: string; name: string | null; phone: string };
+  tags: ConversationTagView[];
 };
 
 const conversationInclude = {
   assignee: { select: { email: true, id: true, name: true } },
   contact: { select: { id: true, name: true, phone: true } },
+  tags: {
+    orderBy: { tag: { createdAt: "asc" } },
+    select: { tag: { select: { color: true, id: true, name: true } } },
+  },
 } as const;
+
+/** The include above returns link rows ({ tag: {...} }); flatten
+ * them so callers always get plain tag objects. */
+function withFlatTags(
+  chat: Omit<ConversationWithContact, "tags"> & {
+    tags: Array<{ tag: ConversationTagView }>;
+  },
+): ConversationWithContact {
+  return { ...chat, tags: chat.tags.map((link) => link.tag) };
+}
 
 export type ConversationFilterKind = "all" | "mine" | "resolved" | "unread";
 
@@ -32,6 +53,110 @@ export interface ConversationFilter {
   kind?: ConversationFilterKind;
   /** Needed for the "mine" filter: only chats assigned to this user. */
   userId?: string;
+  /** Free-text search over the contact's name and phone, and the
+   * text of every message in the chat. Case-insensitive. */
+  search?: string;
+  /** A teammate's user id, or UNASSIGNED for chats nobody owns yet.
+   * Combines with kind: every active filter must match. */
+  assignee?: string;
+  /** Only chats carrying this tag. The caller validates the id
+   * against the workspace's real tags first. */
+  tagId?: string;
+  /** Only chats with exactly this priority ("low" | "normal" |
+   * "high" | "urgent"). */
+  priority?: string;
+  /** "priority" puts urgent chats first (then high, normal,
+   * low), newest first inside each band. Default: newest first. */
+  sort?: ConversationSort;
+}
+
+export type ConversationSort = "recent" | "priority";
+
+export function isConversationSort(value: unknown): value is ConversationSort {
+  return value === "recent" || value === "priority";
+}
+
+/** The assignee filter value meaning "no assignee". A real user id
+ * is a cuid, so this word can never collide with one. */
+export const UNASSIGNED = "unassigned";
+
+/** Build the WHERE clause for the kind + assignee + tag +
+ * priority filters. Search text is handled separately (see
+ * listConversations). */
+function conversationWhere(
+  workspaceId: string,
+  kind: ConversationFilterKind,
+  filter: ConversationFilter,
+): Prisma.ConversationWhereInput {
+  const conditions: Prisma.ConversationWhereInput[] = [];
+  if (kind === "unread") conditions.push({ unreadCount: { gt: 0 } });
+  if (kind === "resolved") conditions.push({ status: "resolved" });
+  if (kind === "mine" && filter.userId) {
+    conditions.push({ assigneeId: filter.userId });
+  }
+  if (filter.assignee === UNASSIGNED) {
+    conditions.push({ assigneeId: null });
+  } else if (filter.assignee) {
+    conditions.push({ assigneeId: filter.assignee });
+  }
+  if (filter.tagId) {
+    conditions.push({
+      tags: { some: { tagId: filter.tagId, workspaceId } },
+    });
+  }
+  if (filter.priority) {
+    conditions.push({ priority: filter.priority });
+  }
+  return {
+    workspaceId,
+    ...(conditions.length > 0 ? { AND: conditions } : {}),
+  };
+}
+
+/** Does this chat match the (already lowercased) search text?
+ * Checks the contact's name and phone, then every message. */
+function conversationMatchesSearch(
+  chat: {
+    contact: { name: string | null; phone: string };
+    messages: Array<{ text: string }>;
+  },
+  needle: string,
+): boolean {
+  const fields = [chat.contact.name, chat.contact.phone];
+  if (fields.some((field) => (field ?? "").toLowerCase().includes(needle))) {
+    return true;
+  }
+  return chat.messages.some((message) =>
+    message.text.toLowerCase().includes(needle),
+  );
+}
+
+/** Conversation priorities, least to most urgent. Plain strings
+ * in the database (SQLite has no enum); validate with
+ * isConversationPriority before saving. */
+export const CONVERSATION_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
+export type ConversationPriority = (typeof CONVERSATION_PRIORITIES)[number];
+
+export function isConversationPriority(value: unknown): value is ConversationPriority {
+  return (
+    value === "low" || value === "normal" || value === "high" || value === "urgent"
+  );
+}
+
+/** Sort rank for priorities. SQL cannot rank these strings
+ * (alphabetically "high" < "low" < "normal" < "urgent"), so the
+ * priority sort happens in memory. Unknown values rank as normal. */
+export function priorityRank(priority: string): number {
+  switch (priority) {
+    case "urgent":
+      return 3;
+    case "high":
+      return 2;
+    case "low":
+      return 0;
+    default:
+      return 1;
+  }
 }
 
 export async function listConversations(
@@ -40,16 +165,50 @@ export async function listConversations(
   filter: ConversationFilter = {},
 ): Promise<ConversationWithContact[]> {
   const kind = filter.kind ?? "all";
-  return db.conversation.findMany({
-    include: conversationInclude,
-    orderBy: { lastMessageAt: "desc" },
-    where: {
-      workspaceId,
-      ...(kind === "unread" ? { unreadCount: { gt: 0 } } : {}),
-      ...(kind === "resolved" ? { status: "resolved" } : {}),
-      ...(kind === "mine" && filter.userId ? { assigneeId: filter.userId } : {}),
-    },
-  });
+  const where = conversationWhere(workspaceId, kind, filter);
+  const search = filter.search?.trim().toLowerCase() ?? "";
+
+  let chats: ConversationWithContact[];
+  if (!search) {
+    const rows = await db.conversation.findMany({
+      include: conversationInclude,
+      orderBy: { lastMessageAt: "desc" },
+      where,
+    });
+    chats = rows.map(withFlatTags);
+  } else {
+    // Text search runs in memory, not in SQL: Prisma's
+    // `mode: "insensitive"` does not exist on SQLite (tests/local),
+    // and plain `contains` is case-sensitive on Postgres
+    // (production) — matching here keeps both databases behaving
+    // the same, the same approach as knowledgeSearch.ts. The inbox
+    // list already loads every chat in the workspace, so this only
+    // adds the message texts while searching.
+    const rows = await db.conversation.findMany({
+      include: { ...conversationInclude, messages: { select: { text: true } } },
+      orderBy: { lastMessageAt: "desc" },
+      where,
+    });
+    chats = rows
+      .filter((chat) => conversationMatchesSearch(chat, search))
+      .map((chat) => {
+        // The message texts were loaded only for searching; drop
+        // them so callers always get the plain conversation shape.
+        const { messages, ...conversation } = chat;
+        void messages;
+        return withFlatTags(conversation);
+      });
+  }
+
+  if (filter.sort === "priority") {
+    // Urgent first; newest first inside each priority band. The
+    // list is already newest-first, and Array.sort is stable, so
+    // sorting by rank alone keeps the recency order within bands.
+    chats = [...chats].sort(
+      (a, b) => priorityRank(b.priority) - priorityRank(a.priority),
+    );
+  }
+  return chats;
 }
 
 export async function getConversation(
@@ -57,10 +216,11 @@ export async function getConversation(
   conversationId: string,
   db: PrismaClient = getPrisma(),
 ): Promise<ConversationWithContact | null> {
-  return db.conversation.findFirst({
+  const chat = await db.conversation.findFirst({
     include: conversationInclude,
     where: { id: conversationId, workspaceId },
   });
+  return chat ? withFlatTags(chat) : null;
 }
 
 export async function listMessages(

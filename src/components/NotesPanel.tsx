@@ -7,6 +7,9 @@ export interface NoteView {
   authorLabel: string;
   createdAtLabel: string;
   id: string;
+  /** True when the signed-in user wrote this note — only then is
+   * a delete button shown (and the API enforces the same rule). */
+  isOwn: boolean;
   text: string;
 }
 
@@ -49,11 +52,32 @@ export function NotesPanel({
     router.refresh();
   }
 
+  async function onDelete(note: NoteView) {
+    if (!window.confirm("Delete this note?")) return;
+    setBusy(true);
+    setError("");
+    const res = await fetch(`/api/inbox/${conversationId}/notes/${note.id}`, {
+      body: JSON.stringify({ workspaceId }),
+      headers: { "Content-Type": "application/json" },
+      method: "DELETE",
+    });
+    const data = (await res.json().catch(() => null)) as {
+      errors?: Record<string, string>;
+    } | null;
+    setBusy(false);
+    if (!res.ok) {
+      setError(data?.errors?.form ?? "Could not delete the note.");
+      return;
+    }
+    router.refresh();
+  }
+
   return (
     <section className="mt-8 rounded-xl border border-[var(--color-note-line)] bg-[var(--color-note)] p-4">
       <h2 className="font-semibold">Internal notes</h2>
       <p className="mt-1 text-sm text-[var(--color-muted)]">
-        Only your team sees these. They are never sent to the customer.
+        Internal note — customer can&apos;t see this. Only your team sees
+        these; they are never sent to the customer.
       </p>
       {notes.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--color-muted)]">No notes yet.</p>
@@ -65,8 +89,20 @@ export function NotesPanel({
               key={note.id}
             >
               <p>{note.text}</p>
-              <p className="mt-1 text-xs text-[var(--color-muted)]">
-                {note.authorLabel} · {note.createdAtLabel}
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
+                <span>
+                  {note.authorLabel} · {note.createdAtLabel}
+                </span>
+                {note.isOwn && (
+                  <button
+                    className="underline"
+                    disabled={busy}
+                    onClick={() => onDelete(note)}
+                    type="button"
+                  >
+                    Delete
+                  </button>
+                )}
               </p>
             </li>
           ))}

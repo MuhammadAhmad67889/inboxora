@@ -5,9 +5,12 @@ import { DraftPanel } from "@/components/DraftPanel";
 import { MarkRead } from "@/components/MarkRead";
 import { NotesPanel } from "@/components/NotesPanel";
 import { ReplyBox } from "@/components/ReplyBox";
+import { TagEditor } from "@/components/TagEditor";
 import { getConversation, listMessages } from "@/lib/inbox";
 import { listNotes } from "@/lib/messaging";
+import { listQuickReplies } from "@/lib/quickReplies";
 import { getCurrentUser } from "@/lib/session";
+import { listTags } from "@/lib/tags";
 import { listMembers, listWorkspacesForUser } from "@/lib/workspaces";
 
 export const dynamic = "force-dynamic";
@@ -33,10 +36,12 @@ export default async function ConversationPage({
   const conversation = await getConversation(current.workspace.id, id);
   if (!conversation) notFound();
 
-  const [messages, notes, members] = await Promise.all([
+  const [messages, notes, members, quickReplies, tags] = await Promise.all([
     listMessages(current.workspace.id, id),
     listNotes(current.workspace.id, id),
     listMembers(current.workspace.id),
+    listQuickReplies(current.workspace.id),
+    listTags(current.workspace.id),
   ]);
 
   // Drafts are not part of the customer-facing thread: they render
@@ -65,7 +70,19 @@ export default async function ConversationPage({
         assigneeId={conversation.assigneeId}
         conversationId={id}
         members={members.map((member) => member.user)}
+        priority={conversation.priority}
         status={conversation.status}
+        workspaceId={current.workspace.id}
+      />
+
+      <TagEditor
+        allTags={tags.map((tag) => ({
+          color: tag.color,
+          id: tag.id,
+          name: tag.name,
+        }))}
+        attachedTags={conversation.tags}
+        conversationId={id}
         workspaceId={current.workspace.id}
       />
 
@@ -115,8 +132,14 @@ export default async function ConversationPage({
       />
 
       <ReplyBox
+        contactName={conversation.contact.name}
         conversationId={id}
         isDemo={conversation.isDemo}
+        quickReplies={quickReplies.map((quickReply) => ({
+          body: quickReply.body,
+          id: quickReply.id,
+          title: quickReply.title,
+        }))}
         workspaceId={current.workspace.id}
       />
 
@@ -126,6 +149,7 @@ export default async function ConversationPage({
           authorLabel: note.author.name ?? note.author.email,
           createdAtLabel: formatClock(note.createdAt),
           id: note.id,
+          isOwn: note.author.id === user.id,
           text: note.text,
         }))}
         workspaceId={current.workspace.id}

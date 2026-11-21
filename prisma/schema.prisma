@@ -34,6 +34,7 @@ model User {
   assignedChats Conversation[]       @relation("Assignee")
   sentMessages  Message[]            @relation("Sender")
   notes         ConversationNote[]   @relation("NoteAuthor")
+  quickReplies  QuickReply[]         @relation("QuickReplyAuthor")
 }
 
 model Session {
@@ -75,9 +76,13 @@ model Workspace {
   contacts      Contact[]
   conversations Conversation[]
   messages      Message[]
+  draftEvents   DraftEvent[]
   knowledge     KnowledgeEntry[]
   tickets       Ticket[]
   notes         ConversationNote[]
+  quickReplies  QuickReply[]
+  tags          Tag[]
+  conversationTags ConversationTag[]
   businessProfile BusinessProfile?
   connection    WhatsAppConnection?
 }
@@ -112,6 +117,46 @@ model Invite {
   @@index([workspaceId])
 }
 
+// A label the team can stick on conversations (e.g. "VIP",
+// "Complaint"). Tags are workspace property: one business's tags
+// never appear in another's inbox. color is a palette key from
+// TAG_COLORS in src/lib/tags.ts (never a raw CSS value), or null
+// for the default chip look.
+model Tag {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  color       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  conversations ConversationTag[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+// The link between one conversation and one tag. Explicit join
+// (not an implicit many-to-many) so the workspaceId can live on
+// the link itself: every tag query is workspace-scoped in one
+// WHERE clause, same as the rest of the schema. Deleting a tag
+// cascades to its links only — conversations are never deleted.
+model ConversationTag {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tagId          String
+  tag            Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([conversationId, tagId])
+  @@index([workspaceId, tagId])
+  @@index([conversationId])
+}
+
 // A WhatsApp customer of one workspace.
 model Contact {
   id          String    @id @default(cuid())
@@ -136,6 +181,9 @@ model Conversation {
   contact       Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
   // "open" or "resolved".
   status        String    @default("open")
+  // "low", "normal", "high" or "urgent" (see CONVERSATION_PRIORITIES
+  // in src/lib/inbox.ts).
+  priority      String    @default("normal")
   assigneeId    String?
   assignee      User?     @relation("Assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   unreadCount   Int       @default(0)
@@ -147,6 +195,8 @@ model Conversation {
   messages Message[]
   tickets  Ticket[]
   notes    ConversationNote[]
+  tags     ConversationTag[]
+  draftEvents DraftEvent[]
 
   @@index([workspaceId, lastMessageAt])
   @@index([contactId])
@@ -257,4 +307,45 @@ model WhatsAppConnection {
   webhookVerifyKey String
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+}
+
+// One recorded step in an AI draft's life, kept only for the
+// analytics page. Drafts themselves are Message rows, but approval
+// overwrites the draft text and discard deletes the row — so
+// without this table there is no honest record of how many drafts
+// were generated, sent as-is, edited, or thrown away. Rows exist
+// only from the day this tracking shipped; earlier drafts are not
+// counted anywhere.
+model DraftEvent {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // "generated", "sent-as-is", "edited" or "discarded".
+  outcome        String
+  // "demo" or "live" — the mode the draft was generated in.
+  aiMode         String?
+  createdAt      DateTime     @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+// A saved reply template the team can insert into the reply box
+// (Phase 5). Inserting only fills the draft — a person still
+// reviews the text and presses Send, same as every other reply.
+// The body may contain {{name}}, replaced with the customer's
+// name at insert time (see src/lib/quickReplyText.ts).
+model QuickReply {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String
+  body        String
+  createdById String?
+  createdBy   User?     @relation("QuickReplyAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId])
 }

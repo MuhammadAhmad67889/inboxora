@@ -1,8 +1,9 @@
-import Link from "next/link";
-import { DemoLoginButton } from "@/components/DemoLoginButton";
-import { getCurrentUser } from "@/lib/session";
+import { LandingHeaderLink, LandingHeroActions } from "@/components/LandingAuth";
 
-export const dynamic = "force-dynamic";
+// This page is static on purpose: it must never wait on the
+// database (the free-tier database sleeps when idle and takes
+// seconds to wake). The signed-in state is checked in the
+// browser by the LandingAuth components instead.
 
 const steps = [
   {
@@ -19,22 +20,12 @@ const steps = [
   },
 ];
 
-export default async function HomePage() {
-  const user = await getCurrentUser();
-
+export default function HomePage() {
   return (
     <main className="mx-auto max-w-3xl px-5 py-12">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xl font-bold">Inboxora</p>
-        {user ? (
-          <Link className="btn-ghost" href="/inbox">
-            Open your inbox
-          </Link>
-        ) : (
-          <Link className="btn-ghost" href="/login">
-            Sign in
-          </Link>
-        )}
+        <LandingHeaderLink />
       </header>
 
       <section className="mt-14">
@@ -46,18 +37,7 @@ export default async function HomePage() {
           sending.
         </p>
         <div className="mt-8 flex flex-wrap items-start gap-3">
-          {user ? (
-            <Link className="btn-primary" href="/inbox">
-              Open your inbox
-            </Link>
-          ) : (
-            <>
-              <DemoLoginButton />
-              <Link className="btn-ghost" href="/signup">
-                Create an account
-              </Link>
-            </>
-          )}
+          <LandingHeroActions />
         </div>
       </section>
 

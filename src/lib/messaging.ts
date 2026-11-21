@@ -1,5 +1,5 @@
 import type { ConversationNote, Message, PrismaClient } from "@prisma/client";
-import { getConversation } from "./inbox";
+import { getConversation, type ConversationPriority } from "./inbox";
 import { getPrisma } from "./prisma";
 import { getMembership } from "./workspaces";
 
@@ -195,6 +195,23 @@ export async function setConversationStatus(
   return { ok: true };
 }
 
+/** Set a conversation's priority (low/normal/high/urgent).
+ * Workspace-scoped, same shape as setConversationStatus. The
+ * caller validates the value with isConversationPriority. */
+export async function setConversationPriority(
+  workspaceId: string,
+  conversationId: string,
+  priority: ConversationPriority,
+  db: PrismaClient = getPrisma(),
+): Promise<AssignResult> {
+  const result = await db.conversation.updateMany({
+    data: { priority },
+    where: { id: conversationId, workspaceId },
+  });
+  if (result.count === 0) return { error: "Conversation not found.", ok: false };
+  return { ok: true };
+}
+
 export type NoteResult =
   | { note: ConversationNote; ok: true }
   | { error: string; ok: false };
@@ -234,4 +251,20 @@ export async function listNotes(
     orderBy: { createdAt: "asc" },
     where: { conversationId, workspaceId },
   });
+}
+
+/** Delete one of your own notes. The WHERE clause pins the note
+ * to this workspace AND this author, so nobody can delete a
+ * teammate's note or reach into another workspace. Returns false
+ * when nothing matched (nothing was deleted). */
+export async function deleteNote(
+  workspaceId: string,
+  noteId: string,
+  authorId: string,
+  db: PrismaClient = getPrisma(),
+): Promise<boolean> {
+  const result = await db.conversationNote.deleteMany({
+    where: { authorId, id: noteId, workspaceId },
+  });
+  return result.count > 0;
 }
