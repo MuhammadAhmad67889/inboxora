@@ -290,7 +290,27 @@ export async function draftReply(
       workspaceId,
     },
   });
+  // Analytics bookkeeping only: approval overwrites this row and
+  // discard deletes it, so the draft's life is recorded separately.
+  await recordDraftEvent(workspaceId, conversationId, "generated", generated.mode, db);
   return { draft, kind: "draft", ok: true };
+}
+
+export type DraftOutcome = "generated" | "sent-as-is" | "edited" | "discarded";
+
+/** Record one step of a draft's life for the analytics page.
+ * The draft Message row itself cannot carry this history:
+ * approval overwrites its text and discard deletes it. */
+async function recordDraftEvent(
+  workspaceId: string,
+  conversationId: string,
+  outcome: DraftOutcome,
+  aiMode: string | null,
+  db: PrismaClient,
+): Promise<void> {
+  await db.draftEvent.create({
+    data: { aiMode, conversationId, outcome, workspaceId },
+  });
 }
 
 export type ApproveResult =
@@ -335,6 +355,17 @@ export async function approveDraft(
     data: { authorType: "agent", senderId, status, text: finalText },
     where: { id: draft.id },
   });
+  // "Sent as-is" means the agent sent the draft's own words. The
+  // draft text goes through the same trim/length cap as the final
+  // text so a whitespace-only difference does not count as an edit.
+  const sentAsIs = finalText === draft.text.trim().slice(0, 2000);
+  await recordDraftEvent(
+    workspaceId,
+    conversationId,
+    sentAsIs ? "sent-as-is" : "edited",
+    draft.aiMode,
+    db,
+  );
   await db.conversation.update({
     data: { lastMessageAt: message.createdAt },
     where: { id: conversationId },
@@ -343,16 +374,19 @@ export async function approveDraft(
 }
 
 /** Discard a draft. The draft row is deleted, so no message is
- * left behind in the thread. */
+ * left behind in the thread — but a DraftEvent stays behind so
+ * the analytics page can count discarded drafts honestly. */
 export async function discardDraft(
   workspaceId: string,
   conversationId: string,
   draftId: string,
   db: PrismaClient = getPrisma(),
 ): Promise<{ ok: true } | { error: string; ok: false }> {
-  const result = await db.message.deleteMany({
+  const draft = await db.message.findFirst({
     where: { conversationId, id: draftId, status: "draft", workspaceId },
   });
-  if (result.count === 0) return { error: "Draft not found.", ok: false };
+  if (!draft) return { error: "Draft not found.", ok: false };
+  await recordDraftEvent(workspaceId, conversationId, "discarded", draft.aiMode, db);
+  await db.message.delete({ where: { id: draft.id } });
   return { ok: true };
 }

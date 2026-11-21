@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { PRIORITY_OPTIONS } from "./TagChip";
 
 export interface MemberOption {
   email: string;
@@ -9,17 +10,20 @@ export interface MemberOption {
   name: string | null;
 }
 
-/** Assign-to picker plus resolve/reopen for one conversation. */
+/** Assign-to picker, priority picker and resolve/reopen for one
+ * conversation. */
 export function ConversationActions({
   assigneeId,
   conversationId,
   members,
+  priority,
   status,
   workspaceId,
 }: {
   assigneeId: string | null;
   conversationId: string;
   members: MemberOption[];
+  priority: string;
   status: string;
   workspaceId: string;
 }) {
@@ -66,6 +70,25 @@ export function ConversationActions({
           {members.map((member) => (
             <option key={member.id} value={member.id}>
               {member.name ?? member.email}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span className="mb-1 block text-sm font-semibold">Priority</span>
+        <select
+          className="field max-w-40"
+          defaultValue={priority}
+          disabled={busy}
+          onChange={(event) =>
+            post(`/api/inbox/${conversationId}/priority`, {
+              priority: event.target.value,
+            })
+          }
+        >
+          {PRIORITY_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
             </option>
           ))}
         </select>
