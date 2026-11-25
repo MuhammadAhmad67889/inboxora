@@ -1,8 +1,3 @@
-/* Hallmark · shape: app screen + landing · genre: modern-minimal · theme: custom (project tokens in @theme below)
- * paper: #f7f5f0 · accent: #0b6e63 · display: system sans · body: system sans
- * nav: app header rows · signature: the AI draft card citing its FAQ source · states: default, hover, focus-visible, active, disabled
- * axes: light/grotesk-sans/chromatic-green · posture: utilitarian · contrast: pass · v2.0.0 */
-/* Hallmark · pre-emit critique: P4 H4 E4 S3 R4 V4 · weakest: S, landing is plain stacked sections; led with the honest demo note and pricing instead of decoration */
 @import "tailwindcss";
 
 /* Design tokens. One accent (WhatsApp-adjacent green, kept deep
